@@ -16,7 +16,7 @@ jobs:
     # Step 2: 构建 Docker 镜像
     - name: Build Docker image
       run: |
-        docker build -t my-video-app .
+        docker build -t video-115-302 .
 
     # Step 3: 登录 Docker Hub（如果需要推送）
     - name: Log in to Docker Hub
@@ -25,5 +25,5 @@ jobs:
     # Step 4: 推送 Docker 镜像到 Docker Hub（可选）
     - name: Push Docker image to Docker Hub
       run: |
-        docker tag my-video-app:latest hb7066925/video-115-302:latest
+        docker tag video-115-302:latest hb7066925/video-115-302:latest
         docker push hb7066925/video-115-302:latest
