@@ -1,0 +1,29 @@
+name: Build Docker Image
+
+# 手动触发工作流
+on:
+  workflow_dispatch:  # 手动触发器
+
+jobs:
+  build-docker:
+    runs-on: ubuntu-latest
+
+    steps:
+    # Step 1: 检出当前仓库代码
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    # Step 2: 构建 Docker 镜像
+    - name: Build Docker image
+      run: |
+        docker build -t my-video-app .
+
+    # Step 3: 登录 Docker Hub（如果需要推送）
+    - name: Log in to Docker Hub
+      run: echo "${{ secrets.DOCKERHUB_PASSWORD }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+
+    # Step 4: 推送 Docker 镜像到 Docker Hub（可选）
+    - name: Push Docker image to Docker Hub
+      run: |
+        docker tag my-video-app:latest your-dockerhub-username/my-video-app:latest
+        docker push your-dockerhub-username/my-video-app:latest
