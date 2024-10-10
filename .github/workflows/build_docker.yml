@@ -25,5 +25,5 @@ jobs:
     # Step 4: 推送 Docker 镜像到 Docker Hub（可选）
     - name: Push Docker image to Docker Hub
       run: |
-        docker tag my-video-app:latest your-dockerhub-username/my-video-app:latest
-        docker push your-dockerhub-username/my-video-app:latest
+        docker tag my-video-app:latest hb7066925/video-115-302:latest
+        docker push hb7066925/video-115-302:latest
