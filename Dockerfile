@@ -15,5 +15,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 # RUN pip install <your_dependencies>
 
 # 将 video-115-302.py 作为入口文件执行
-CMD ["python", "video-115-302.py"]
+CMD ["python", "video-115-302.py", "-f", "a.db"]
 
