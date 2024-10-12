@@ -9,9 +9,3 @@ RUN pip install --upgrade pip
 
 # 复制所有文件到工作目录
 COPY . /app
-
-# 安装项目依赖
-RUN pip install -r requirements.txt
-
-# 启动应用
-CMD ["python", "video-115-302.py", "-f", "a.db"]
