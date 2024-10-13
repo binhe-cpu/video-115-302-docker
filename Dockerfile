@@ -22,4 +22,6 @@ COPY . /app
 RUN pip install -r requirements.txt
 
 # 启动应用程序
+CMD ["python", "updatedb.py"]
+CMD ["python", "servedb.py","-fs"]
 CMD ["python", "video-115-302.py", "-f", "a.db"]
