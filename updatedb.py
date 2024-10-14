@@ -57,7 +57,7 @@ if __name__ == "__main__":
 import logging
 
 from collections import deque, ChainMap
-from collections.abc import Collection, Iterator, Iterable
+from collections.abc import Collection, Iterator, Iterable, Mapping
 from errno import EBUSY, ENOENT, ENOTDIR
 from os.path import splitext
 from sqlite3 import (
@@ -112,7 +112,7 @@ def cut_iter(
         yield start, stop - start
 
 
-def normalize_path(path: str, /):
+def normalize_path(path: str, /) -> int | str:
     if path in ("0", ".", "..", "/"):
         return 0
     if path.isdecimal():
@@ -120,9 +120,13 @@ def normalize_path(path: str, /):
     if path.startswith("根目录 > "):
         patht = path.split(" > ")
         patht[0] = ""
-        return joins(patht)
-    if not path.startswith("/"):
-        path = "/" + path
+        path = joins(patht)
+    else:
+        if not path.startswith("/"):
+            path = "/" + path
+        path = normpath(path)
+    if path == "/":
+        return 0
     return normpath(path)
 
 
@@ -169,14 +173,6 @@ def initdb(con: Connection | Cursor, /) -> Cursor:
     conn.row_factory = Row
     conn.create_function("escape_name", 1, escape)
     conn.create_function("json_array_head_replace", 3, json_array_head_replace)
-    dbpath = con.execute("SELECT file FROM pragma_database_list() WHERE name='main';").fetchone()[0]
-    file_dbpath = "%s-file%s" % splitext(dbpath)
-    con.execute("ATTACH DATABASE ? AS file;", (file_dbpath,))
-    try:
-        con2 = connect(file_dbpath)
-        con2.execute("PRAGMA journal_mode = WAL;")
-    finally:
-        con2.close()
     return con.executescript("""\
 PRAGMA journal_mode = WAL;
 
@@ -196,10 +192,21 @@ CREATE TABLE IF NOT EXISTS data (
     updated_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%S.%f+08:00', 'now', '+8 hours'))
 );
 
-CREATE TABLE IF NOT EXISTS file.data (
-    id INTEGER NOT NULL PRIMARY KEY,
-    data BLOB,
-    temp_path TEXT
+CREATE TABLE IF NOT EXISTS trash (
+    _id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id INTEGER NOT NULL,
+    parent_id INTEGER NOT NULL,
+    pickcode TEXT NOT NULL DEFAULT '',
+    name TEXT NOT NULL,
+    size INTEGER NOT NULL DEFAULT 0,
+    sha1 TEXT NOT NULL DEFAULT '',
+    is_dir INTEGER NOT NULL CHECK(is_dir IN (0, 1)),
+    is_image INTEGER NOT NULL CHECK(is_image IN (0, 1)) DEFAULT 0,
+    ctime INTEGER NOT NULL DEFAULT 0,
+    mtime INTEGER NOT NULL DEFAULT 0,
+    path TEXT NOT NULL DEFAULT '',
+    ancestors JSON NOT NULL DEFAULT '',
+    created_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%S.%f+08:00', 'now', '+8 hours'))
 );
 
 CREATE TRIGGER IF NOT EXISTS trg_data_updated_at
@@ -367,11 +374,30 @@ WHERE
 
 def insert_items(
     con: Connection | Cursor, 
-    items: dict | Iterable[dict], 
+    items: Mapping | Iterable[Mapping], 
     /, 
     commit: bool = True, 
+    with_path: bool = False, 
 ) -> Cursor:
-    sql = """\
+    if with_path:
+        sql = """\
+INSERT INTO
+    data(id, parent_id, pickcode, name, size, sha1, is_dir, is_image, ctime, path, ancestors, mtime)
+VALUES
+    (:id, :parent_id, :pickcode, :name, :size, :sha1, :is_dir, :is_image, :ctime, :path, :ancestors, :mtime)
+ON CONFLICT(id) DO UPDATE SET
+    parent_id = excluded.parent_id,
+    pickcode  = excluded.pickcode,
+    name      = excluded.name,
+    ctime     = excluded.ctime,
+    mtime     = excluded.mtime,
+    path      = excluded.path,
+    ancestors = excluded.ancestors
+WHERE
+    mtime != excluded.mtime
+"""
+    else:
+        sql = """\
 INSERT INTO
     data(id, parent_id, pickcode, name, size, sha1, is_dir, is_image, ctime, mtime)
 VALUES
@@ -385,7 +411,7 @@ ON CONFLICT(id) DO UPDATE SET
 WHERE
     mtime != excluded.mtime
 """
-    if isinstance(items, dict):
+    if isinstance(items, Mapping):
         items = items,
     if commit:
         return execute_commit(con, sql, items, executemany=True)
@@ -403,11 +429,21 @@ def delete_items(
         cond = f"id = {ids:d}"
     else:
         cond = "id IN (%s)" % (",".join(map(str, ids)) or "NULL")
-    sql = f"DELETE FROM data WHERE {cond}"
+    sql = f"""\
+DELETE FROM data WHERE {cond}
+RETURNING id, parent_id, pickcode, name, size, sha1, is_dir, is_image, ctime, path, ancestors, mtime"""
+    cur = con.execute(sql)
+    sql = """\
+INSERT INTO
+    trash(id, parent_id, pickcode, name, size, sha1, is_dir, is_image, ctime, path, ancestors, mtime)
+VALUES
+    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+"""
+    items = list(cur)
     if commit:
-        return execute_commit(con, sql)
+        return execute_commit(cur, sql, items, executemany=True)
     else:
-        return con.execute(sql)
+        return cur.executemany(sql, items)
 
 
 def update_files_time(
@@ -665,28 +701,37 @@ def updatedb(
         if isinstance(top_dirs, int):
             top_ids: Collection[int] = (top_dirs,)
         elif isinstance(top_dirs, str):
-            try:
-                resp = client.fs_dir_getid(normalize_path(top_dirs))
-                if not resp["state"]:
+            top_dir = normalize_path(top_dirs)
+            if isinstance(top_dir, int):
+                top_ids = (top_dir,)
+            else:
+                try:
+                    resp = client.fs_dir_getid(top_dir)
+                    if not resp["id"]:
+                        return
+                    top_ids = (int(resp["id"]),)
+                except:
+                    logger.exception("[\x1b[1;31mFAIL\x1b[0m] %r", top_dirs)
                     return
-                top_ids = (int(resp["id"]),)
-            except:
-                logger.exception("[\x1b[1;31mFAIL\x1b[0m] %s", top_dirs)
-                return
         else:
             top_ids = set()
+            add_id = top_ids.add
             for top_dir in top_dirs:
                 if isinstance(top_dir, int):
-                    top_ids.add(top_dir)
+                    add_id(top_dir)
                 else:
-                    try:
-                        resp = client.fs_dir_getid(normalize_path(top_dir))
-                        if not resp["state"]:
+                    top_dir = normalize_path(top_dir)
+                    if isinstance(top_dir, int):
+                        add_id(top_dir)
+                    else:
+                        try:
+                            resp = client.fs_dir_getid(top_dir)
+                            if not resp["id"]:
+                                continue
+                            add_id(int(resp["id"]))
+                        except:
+                            logger.exception("[\x1b[1;31mFAIL\x1b[0m] %r", top_dir)
                             continue
-                        top_ids.add(int(resp["id"]))
-                    except:
-                        logger.exception("[\x1b[1;31mFAIL\x1b[0m] %s", top_dir)
-                        continue
             if not top_ids:
                 return
         if resume:
