@@ -6,12 +6,13 @@ from os.path import abspath, join as joinpath
 from glob import iglob
 from p115client import P115Client
 from p115client.tool import export_dir_parse_iter
+from p115client.tool import get_id_of_path
 
 # 初始化 P115Client，使用 cookie 文件进行身份验证，并设置应用为 "harmony"
 client = P115Client(Path("./115-cookies.txt").expanduser(), app="harmony", check_for_relogin=True)
 
 # 远程文件夹的 CID (替换成你的实际 CID)
-cid = 3011752007422704845
+cid = int(get_id_of_path(client, "/测试"))  # 确保 cid 是整数类型
 
 # 特殊字符的 URL 编码转换表
 transtab = {c: f"%{c:02x}" for c in b"%?#"}
@@ -35,10 +36,10 @@ for path in remote_files:
     # 检查文件扩展名是否属于定义的视频文件类型
     if Path(path).suffix.lower() in video_extensions:
         # 生成 URL 并将路径中的特殊字符进行 URL 编码
-        url = "http://192.168.2.2:8000" + translate(path, transtab)
+        url = "https://115302.hbnas.eu.org:16666" + translate(path, transtab)
 
         # 构造 .strm 文件的本地路径
-        strm_file_path = abspath(joinpath(local_strm_dir, "." + path + ".strm"))
+        strm_file_path = abspath(joinpath(local_strm_dir, str(Path(path.removeprefix("/")).with_suffix('')) + ".strm"))
         # 存储远程文件对应的 .strm 文件路径和 URL
         remote_strm_files[strm_file_path] = url
 
