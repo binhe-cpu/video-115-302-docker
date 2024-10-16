@@ -1,11 +1,11 @@
-from p115client import P115Client
+import os
 from pathlib import Path
 from os import makedirs, remove
 from posixpath import dirname
 from os.path import abspath, join as joinpath
 from glob import iglob
+from p115client import P115Client
 from p115client.tool import export_dir_parse_iter
-import os
 
 # 初始化 P115Client，使用 cookie 文件进行身份验证，并设置应用为 "harmony"
 client = P115Client(Path("./115-cookies.txt").expanduser(), app="harmony", check_for_relogin=True)
@@ -27,7 +27,7 @@ if not os.path.exists(local_strm_dir):
 # 定义常见视频文件的扩展名集合
 video_extensions = {'.mkv', '.iso', '.ts', '.mp4', '.avi', '.rmvb', '.wmv', '.m2ts', '.mpg', '.flv', '.rm', '.mov'}
 
-# 第一步：获取远程视频文件，并为每个视频文件生成对应的 .strm 文件路径
+# 获取远程视频文件，并为每个视频文件生成对应的 .strm 文件路径
 remote_strm_files = {}  # 用于存储远程文件对应的 .strm 文件路径和 URL
 remote_files = set(export_dir_parse_iter(client, cid))  # 获取远程目录中所有的文件路径
 
@@ -42,17 +42,17 @@ for path in remote_files:
         # 存储远程文件对应的 .strm 文件路径和 URL
         remote_strm_files[strm_file_path] = url
 
-# 第二步：获取本地所有的 .strm 文件
+# 获取本地所有的 .strm 文件
 local_strm_files = {os.path.join(local_strm_dir, f) for f in os.listdir(local_strm_dir) if f.endswith(".strm")}
 
-# 第三步：对比远程和本地文件，找出新增和需要删除的文件
+# 对比远程和本地文件，找出新增和需要删除的文件
 # 新增的文件（远程存在且本地不存在）
 new_files = set(remote_strm_files.keys()) - local_strm_files
 # 需要删除的文件（本地存在但远程已不存在）
 local_strm_files = {abspath(joinpath(local_strm_dir, f)) for f in iglob("**/*.strm", root_dir=local_strm_dir, recursive=True)}
 deleted_files = local_strm_files - set(remote_strm_files.keys())
 
-# 第四步：处理新增的 .strm 文件，跳过本地已有的
+# 处理新增的 .strm 文件，跳过本地已有的
 for file in new_files:
     url = remote_strm_files[file]
     try:
@@ -69,7 +69,7 @@ for file in new_files:
     except Exception as e:
         print(f"创建 {file} 时出错: {e}")
 
-# 第五步：删除不再存在于远程的 .strm 文件
+# 删除不再存在于远程的 .strm 文件
 for file in deleted_files:
     try:
         # 删除本地的 .strm 文件
@@ -78,3 +78,27 @@ for file in deleted_files:
         print(f"删除 .strm 文件: {file}")
     except Exception as e:
         print(f"删除 {file} 时出错: {e}")
+
+
+# 删除空文件夹的功能
+def delete_empty_folders(root):
+    deleted = set()
+    for current_dir, subdirs, files in os.walk(root, topdown=False):
+        still_has_subdirs = False
+        for subdir in subdirs:
+            if os.path.join(current_dir, subdir) not in deleted:
+                still_has_subdirs = True
+                break
+        # 检查是否没有文件且没有剩余子目录
+        if not any(files) and not still_has_subdirs:
+            os.rmdir(current_dir)  # 删除空文件夹
+            deleted.add(current_dir)  # 记录已删除的文件夹
+    return deleted
+
+
+# 删除指定目录下的空文件夹
+empty_folders = delete_empty_folders(local_strm_dir)
+if empty_folders:
+    print(f"已删除空文件夹: {empty_folders}")
+else:
+    print("没有空文件夹需要删除")
